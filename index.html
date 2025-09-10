@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>5×5 매칭 카드게임 — 단일 페이지</title>
+<style>
+  body{margin:0;font-family:system-ui;background:#f8fafc;color:#0f172a}
+  .wrap{max-width:900px;margin:0 auto;padding:20px}
+  textarea{width:100%;height:160px}
+  .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;max-width:760px;margin:0 auto}
+  .tile{aspect-ratio:1/1;border:1px solid #cbd5e1;border-radius:10px;display:flex;align-items:center;justify-content:center}
+  .tile.open{background:#fff}
+  .tile.matched{opacity:.25}
+  .face{font-weight:700}
+  .share{margin-top:10px;padding:10px;border:1px dashed #aaa;border-radius:10px;background:#fff;display:none}
+  .share input{width:100%;font-family:monospace;padding:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>5×5 매칭 카드게임</h1>
+  <button id="btnShare">링크 만들기</button>
+  <button id="btnReset">처음으로</button>
+
+  <section id="setup">
+    <p>한 줄에 작품명,이미지URL 형식으로 입력하세요. (예: 모네 - 수련연못,https://i.imgur.com/xU5lhcz.png)</p>
+    <textarea id="ta"></textarea>
+    <button id="btnStart">게임 시작</button>
+    <button id="btnSample">샘플 불러오기</button>
+    <div id="msg"></div>
+    <div id="shareBox" class="share">
+      <p>아래 링크를 복사해서 학생에게 보내세요:</p>
+      <input id="shareInput" readonly>
+      <button id="btnCopy">복사</button>
+      <button id="btnOpen">열어보기</button>
+      <div id="shareStatus"></div>
+    </div>
+  </section>
+
+  <section id="game" hidden>
+    <div>뒤집힌 카드: <span id="openCount">0</span>/2 | 남은 카드: <span id="leftCount">25</span></div>
+    <div id="grid" class="grid"></div>
+    <div id="win" hidden>🎉 모든 카드를 제거했습니다!</div>
+  </section>
+</div>
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const ta=$('#ta'), btnStart=$('#btnStart'), btnSample=$('#btnSample'), btnShare=$('#btnShare'), btnReset=$('#btnReset');
+  const msg=$('#msg'), grid=$('#grid'), openCount=$('#openCount'), leftCount=$('#leftCount'), setup=$('#setup'), game=$('#game'), win=$('#win');
+  const shareBox=$('#shareBox'), shareInput=$('#shareInput'), btnCopy=$('#btnCopy'), btnOpen=$('#btnOpen'), shareStatus=$('#shareStatus');
+
+  let board=[], disabled=false;
+
+  function parse(raw){ return raw.split(/\n/).map(l=>l.trim()).filter(Boolean).map((line,i)=>{const [t,img]=line.split(/[,|]/).map(s=>(s||'').trim());return {id:'p'+i,text:t,image:img};}); }
+
+  btnStart.onclick=()=>{const pairs=parse(ta.value); if(pairs.length<12){msg.textContent='12쌍 이상 필요합니다.';return;} start(pairs.slice(0,12));};
+
+  function start(pairs){ let cards=[]; pairs.forEach((p,i)=>{cards.push({id:p.id,type:'text',face:p.text,matched:false,flipped:false});cards.push({id:p.id,type:'image',face:p.image,matched:false,flipped:false});});cards.push({id:'free',type:'free',face:'⭐',matched:false,flipped:false}); board=shuffle(cards); setup.hidden=true; game.hidden=false; render(); }
+
+  function render(){ grid.innerHTML=''; board.forEach((c,i)=>{const b=document.createElement('button');b.className='tile'+(c.flipped||c.matched?' open':'')+(c.matched?' matched':'');b.disabled=c.matched;b.onclick=()=>flip(i);if(c.flipped||c.matched){if(c.type==='image'){const img=document.createElement('img');img.src=c.face;img.style.maxWidth='100%';img.style.maxHeight='100%';b.appendChild(img);}else{b.textContent=c.face;}} else b.textContent='?'; grid.appendChild(b);}); openCount.textContent=board.filter(c=>c.flipped&&!c.matched).length; leftCount.textContent=board.filter(c=>!c.matched).length; if(board.every(c=>c.matched)) win.hidden=false; }
+
+  function flip(i){ if(disabled) return; const c=board[i]; if(c.flipped||c.matched) return; c.flipped=true; render(); if(c.type==='free'){c.matched=true; render(); return;} const open=board.filter(x=>x.flipped&&!c.matched); if(open.length===2){ disabled=true; setTimeout(()=>{const[a,b]=open; if(a.id===b.id&&a.type!==b.type){a.matched=b.matched=true;} else {a.flipped=b.flipped=false;} disabled=false; render();},500);} }
+
+  function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+  // 링크 만들기/복사
+  btnShare.onclick=()=>{
+    const data=b64EncodeUtf8(ta.value||'');
+    // baseURI가 srcdoc/null이면 사용자가 직접 URL 제공
+    let base;
+    if(/^about:|^null/.test(document.baseURI)||location.origin==='null'){
+      base=prompt('배포할 기본 URL을 입력하세요 (예: https://example.com/game.html)', '');
+      if(!base) return;
+    } else {
+      base=(location.origin+location.pathname);
+    }
+    const url=base+'#data='+data;
+    shareInput.value=url;
+    shareBox.style.display='block';
+    shareStatus.textContent='';
+  };
+
+  btnCopy.onclick=()=>{ shareInput.select(); document.execCommand('copy'); shareStatus.textContent='✅ 복사됨'; };
+  btnOpen.onclick=()=>{ window.open(shareInput.value,'_blank'); };
+
+  (function loadFromHash(){ const m=location.hash.match(/data=([^&]+)/); if(!m) return; try{ const decoded=b64DecodeUtf8(m[1]); ta.value=decoded; const ps=parse(decoded); if(ps.length>=12) start(ps.slice(0,12)); else msg.textContent='링크 데이터가 12쌍 미만입니다.'; }catch(e){ alert('링크 데이터 해석 실패'); }})();
+
+  btnSample.onclick=()=>{ ta.value=`모네 - 수련연못,https://i.imgur.com/xU5lhcz.png\n르누아르 - 피아노앞의 소녀들,https://i.imgur.com/h5zsepu.png\n루벤스 - 사자굴속의 다니엘,https://i.imgur.com/rh2TGY4.png\n보테로 - 모나리자,https://i.imgur.com/P182N4A.png\n뭉크 - 절규,https://i.imgur.com/Fo2p9Kj.png\n드가 - 녹색옷의 무용수,https://i.imgur.com/83AL8rX.png\n로뎅 - 생각하는 사람,https://i.imgur.com/aNrsGSr.png\n렘브란트 - 자화상,https://i.imgur.com/OlLuThl.png\n모네 - 햇빛속의 건초더미,https://i.imgur.com/eq9b6xw.png\n반고흐 - 오베르의 교회,https://i.imgur.com/gkQYxX4.png\n뒤러 - 하세,https://i.imgur.com/uOt0lmF.png\n프리다 칼로 - 원숭이가 있는 자화상,https://i.imgur.com/0N1m0nK.png`; };
+  btnReset.onclick=()=>{ setup.hidden=false; game.hidden=true; win.hidden=true; };
+
+  function b64EncodeUtf8(str){ return btoa(unescape(encodeURIComponent(str))); }
+  function b64DecodeUtf8(b64){ return decodeURIComponent(escape(atob(b64))); }
+})();
+</script>
+</body>
+</html>
